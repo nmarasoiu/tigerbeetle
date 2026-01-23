@@ -5,11 +5,13 @@ const os = std.os;
 const IO_Linux = @import("io/linux.zig").IO;
 const IO_Darwin = @import("io/darwin.zig").IO;
 const IO_Windows = @import("io/windows.zig").IO;
+const IO_FreeBSD = @import("io/freebsd.zig").IO;
 
 pub const IO = switch (builtin.target.os.tag) {
     .linux => IO_Linux,
     .windows => IO_Windows,
     .macos, .tvos, .watchos, .ios => IO_Darwin,
+    .freebsd => IO_FreeBSD,
     else => @compileError("IO is not supported for platform"),
 };
 
@@ -28,6 +30,7 @@ pub fn buffer_limit(buffer_len: usize) usize {
     const limit = switch (builtin.target.os.tag) {
         .linux => 0x7ffff000,
         .macos, .ios, .watchos, .tvos => std.math.maxInt(i32),
+        .freebsd => std.math.maxInt(isize), // FreeBSD uses standard POSIX limits
         else => std.math.maxInt(isize),
     };
     return @min(limit, buffer_len);

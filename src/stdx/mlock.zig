@@ -18,6 +18,7 @@ const mlockall_error = "Unable to lock pages in memory ({s})" ++
 pub fn memory_lock_allocated(options: struct { allocated_size: usize }) MemoryLockError!void {
     switch (builtin.os.tag) {
         .linux => try memory_lock_allocated_linux(),
+        .freebsd => try memory_lock_allocated_freebsd(),
         .macos => {
             // macOS has mlock() but not mlockall(). mlock() requires an address range which
             // would be difficult to gather for non-heap memory that is also faulted in,
@@ -41,6 +42,24 @@ fn memory_lock_allocated_linux() MemoryLockError!void {
             "insufficient privileges to lock memory",
         }),
         .INVAL => unreachable, // MCL_ONFAULT specified without MCL_CURRENT.
+        else => |err| return stdx.unexpected_errno("mlockall", err),
+    }
+    return error.memory_not_locked;
+}
+
+fn memory_lock_allocated_freebsd() MemoryLockError!void {
+    // FreeBSD mlockall(2) - MCL_CURRENT locks all pages currently mapped.
+    // FreeBSD doesn't have MCL_ONFAULT, so we only use MCL_CURRENT.
+    const MCL_CURRENT = 0x0001; // Lock all currently mapped pages.
+    const result = std.c.mlockall(MCL_CURRENT);
+    if (result == 0) return;
+    switch (std.posix.errno(result)) {
+        .AGAIN => log.warn(mlockall_error, .{"some addresses could not be locked"}),
+        .NOMEM => log.warn(mlockall_error, .{"memory would exceed RLIMIT_MEMLOCK"}),
+        .PERM => log.warn(mlockall_error, .{
+            "insufficient privileges to lock memory",
+        }),
+        .INVAL => unreachable,
         else => |err| return stdx.unexpected_errno("mlockall", err),
     }
     return error.memory_not_locked;
