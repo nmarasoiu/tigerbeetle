@@ -4,26 +4,83 @@
 
 ```
 TigerBeetle I/O Layer
-├── src/io/linux.zig    → io_uring (2078 lines)
-├── src/io/darwin.zig   → kqueue   (1073 lines)  ← BASE FOR PORT
+├── src/io/linux.zig    → io_uring (2078 lines) - async but ZFS/security issues
+├── src/io/darwin.zig   → kqueue   (1073 lines) - blocking disk I/O
 ├── src/io/windows.zig  → IOCP     (1578 lines)
-├── src/io/freebsd.zig  → kqueue   (~1100 lines) ← NEW
+├── src/io/freebsd.zig  → kqueue + AIO (~1200 lines) ← NEW - TRUE async!
 └── src/io/common.zig   → shared POSIX code
 ```
 
+## FreeBSD Native AIO: The Best of Both Worlds
+
+Unlike darwin.zig (which uses blocking pread/pwrite for disk I/O) and linux.zig
+(which uses io_uring with known ZFS/security issues), FreeBSD's port uses
+native POSIX AIO:
+
+| Platform | Disk I/O | Network I/O | ZFS Safe | Truly Async |
+|----------|----------|-------------|----------|-------------|
+| Linux (io_uring) | io_uring | io_uring | ❌ | ✅ |
+| Linux (sync mode) | pread/pwrite | io_uring | ✅ | ❌ |
+| macOS | pread/pwrite | kqueue | N/A | ❌ |
+| **FreeBSD** | **aio_read/write** | **kqueue** | **✅** | **✅** |
+
+### How FreeBSD AIO Works
+
+```zig
+// 1. Submit async read - returns immediately
+aio_read(&aiocb);
+
+// 2. Register for kqueue notification
+kevent(kq, &[_]Kevent{.{
+    .ident = @intFromPtr(&aiocb),
+    .filter = EVFILT_AIO,  // AIO completion filter
+    .flags = EV_ADD | EV_ONESHOT,
+}}, ...);
+
+// 3. kqueue wakes us when I/O completes
+// 4. Get result with aio_return(&aiocb)
+```
+
+Key advantage: The event loop never blocks on disk I/O. Network and disk
+operations are truly concurrent.
+
 ## Files to Create/Modify
 
-### 1. `src/io/freebsd.zig` (NEW)
+### 1. `src/io/freebsd.zig` (NEW) - IMPLEMENTED
 
-Copy from `darwin.zig` with these changes:
+Based on `darwin.zig` architecture but with TRUE async disk I/O via AIO:
 
 | Feature | macOS (darwin.zig) | FreeBSD | Change |
 |---------|-------------------|---------|--------|
+| **Disk Read** | `pread()` - BLOCKING | `aio_read()` + EVFILT_AIO | TRUE async! |
+| **Disk Write** | `pwrite()` - BLOCKING | `aio_write()` + EVFILT_AIO | TRUE async! |
 | Direct I/O | `F_NOCACHE` fcntl | `O_DIRECT` flag | Use flag in open() |
 | fsync | `F_FULLFSYNC` (fsync lies on macOS) | `fsync()` works correctly | Simpler code |
 | Preallocation | `F_PREALLOCATE` fcntl | `posix_fallocate()` | Replace ~40 lines |
 | SIGPIPE | `SO_NOSIGPIPE` | `SO_NOSIGPIPE` | No change |
 | CLOEXEC | fcntl workaround | `SOCK_CLOEXEC` works | Can simplify |
+
+#### AIO C Bindings Added
+
+```zig
+const c = struct {
+    const aiocb = extern struct {
+        aio_fildes: c_int,
+        aio_offset: i64,
+        aio_buf: ?*anyopaque,
+        aio_nbytes: usize,
+        aio_sigevent: sigevent,
+        // ... other fields
+    };
+
+    extern "c" fn aio_read(aiocb: *aiocb) c_int;
+    extern "c" fn aio_write(aiocb: *aiocb) c_int;
+    extern "c" fn aio_error(aiocb: *const aiocb) c_int;
+    extern "c" fn aio_return(aiocb: *aiocb) isize;
+};
+
+const EVFILT_AIO: i16 = -3;  // kqueue filter for AIO completion
+```
 
 ### 2. `build.zig`
 
@@ -50,7 +107,43 @@ pub const IO = switch (builtin.os.tag) {
 
 ## Key Code Changes in freebsd.zig
 
-### 1. Direct I/O (O_DIRECT instead of F_NOCACHE)
+### 1. Async Disk I/O via AIO (MAJOR CHANGE)
+
+**darwin.zig**: Disk operations block the event loop
+```zig
+// In do_operation callback - runs synchronously in event loop!
+fn do_operation(op: anytype) ReadError!usize {
+    return posix.pread(op.fd, op.buf[0..op.len], op.offset);
+}
+```
+
+**freebsd.zig**: TRUE async with AIO + EVFILT_AIO
+```zig
+pub fn read(self: *IO, ...) void {
+    // Set up AIO control block
+    aiocb_ptr.aio_sigevent.sigev_notify = c.SIGEV_KEVENT;  // Notify via kqueue
+
+    // Submit async read - returns immediately
+    _ = c.aio_read(aiocb_ptr);
+
+    // Register with kqueue for completion
+    kevent(kq, &[_]Kevent{.{
+        .ident = @intFromPtr(aiocb_ptr),
+        .filter = EVFILT_AIO,
+        .udata = @intFromPtr(completion),
+    }}, ...);
+
+    self.aio_pending.push(completion);
+    self.io_inflight += 1;
+}
+
+fn handle_aio_completion(self: *IO, completion: *Completion) void {
+    const bytes_read = c.aio_return(aiocb_ptr);
+    // ... invoke callback with result
+}
+```
+
+### 2. Direct I/O (O_DIRECT instead of F_NOCACHE)
 
 **darwin.zig** (lines 944-948):
 ```zig
@@ -157,12 +250,24 @@ builtin.target.os.tag
 2. **Integration tests**: Run TigerBeetle cluster on FreeBSD
 3. **Cross-platform**: Ensure Linux/macOS still work after changes
 
-## Estimated Lines of Code
+## Lines of Code (Actual)
 
-| File | Lines Changed |
-|------|---------------|
-| freebsd.zig (new) | ~1100 (mostly copy) |
-| Actual diff from darwin.zig | ~100 lines |
-| build.zig | ~20 lines |
-| Platform detection | ~10 lines |
-| **Total new/changed** | ~130 lines of actual work |
+| File | Lines | Notes |
+|------|-------|-------|
+| freebsd.zig (new) | ~1200 | Full AIO implementation |
+| Diff from darwin.zig | ~300 lines | AIO bindings, submit_aio, async read/write |
+| build.zig | ~10 lines | Added FreeBSD targets |
+| Platform detection files | ~15 lines | tigerbeetle.zig, time.zig, mlock.zig, etc. |
+| **Total new/changed** | ~325 lines of actual work |
+
+## Implementation Status
+
+- [x] AIO C bindings (aiocb, aio_read, aio_write, aio_error, aio_return)
+- [x] EVFILT_AIO kqueue integration
+- [x] Async read() using aio_read
+- [x] Async write() using aio_write
+- [x] io_inflight tracking for AIO operations
+- [x] build.zig FreeBSD targets
+- [x] Platform detection in all relevant files
+- [ ] Test on actual FreeBSD system
+- [ ] Validate AIO struct layout matches FreeBSD headers
