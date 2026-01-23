@@ -928,18 +928,8 @@ pub const IO = struct {
                     return;
                 }
 
-                // Explicit fsync for durability - goes to ZIL/SLOG on ZFS.
-                // Separation of concerns: aio_write = async data transfer,
-                // fsync = explicit "make durable now" call.
-                posix.fsync(op.fd) catch {
-                    callback(
-                        @ptrCast(@alignCast(_completion.context)),
-                        _completion,
-                        error.AioError,
-                    );
-                    return;
-                };
-
+                // Durability: O_DSYNC on file open means this write is already durable.
+                // No explicit fsync needed here — same pattern as Linux io_uring.
                 callback(
                     @ptrCast(@alignCast(_completion.context)),
                     _completion,
@@ -1130,9 +1120,9 @@ pub const IO = struct {
         var flags: posix.O = .{
             .CLOEXEC = true,
             .ACCMODE = if (purpose == .inspect) .RDONLY else .RDWR,
-            // FreeBSD: We explicitly fsync() after writes rather than using O_DSYNC.
-            // This gives clear separation: aio_write = async data transfer,
-            // fsync = explicit durability to ZIL/SLOG. Each syscall does one thing.
+            // O_DSYNC: each write completion = durable. Same as Linux io_uring approach.
+            // fsync() still used on edges (file open, directory sync) per Linux pattern.
+            .DSYNC = if (purpose == .inspect) false else true,
         };
         var mode: posix.mode_t = 0;
 
@@ -1156,8 +1146,10 @@ pub const IO = struct {
             },
         }
 
-        // Note: No O_DSYNC - we use explicit fsync() after writes for durability.
-        // This matches our principled approach: write = transfer, fsync = durable.
+        // Critical: for write paths, O_DSYNC ensures each write is durable on completion.
+        // Same invariant as Linux io_uring path.
+        if (purpose != .inspect) assert(flags.DSYNC);
+
         assert(!std.fs.path.isAbsolute(relative_path));
         const fd = try posix.openat(dir_fd, relative_path, flags, mode);
         errdefer posix.close(fd);
