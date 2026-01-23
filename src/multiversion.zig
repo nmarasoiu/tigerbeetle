@@ -773,7 +773,7 @@ pub const MultiversionOS = struct {
         errdefer posix.close(target_fd);
 
         const args_envp: ArgsEnvp = switch (builtin.target.os.tag) {
-            .linux, .macos => blk: {
+            .linux, .macos, .freebsd => blk: {
                 // We can pass through our env as-is to exec. We have to manipulate the types
                 // here somewhat: they're cast in start.zig and we can't access `argc_argv_ptr`
                 // directly. process.zig does the same trick in execve().
@@ -808,7 +808,7 @@ pub const MultiversionOS = struct {
             .exe_path = exe_path,
             .exe_path_format = switch (exe_path_format) {
                 .native => switch (builtin.target.os.tag) {
-                    .linux => .elf,
+                    .linux, .freebsd => .elf,
                     .windows => .pe,
                     .macos => .macho,
                     else => comptime unreachable,
@@ -2174,7 +2174,7 @@ pub fn print_information(
 /// Caller owns returned memory.
 fn system_temporary_directory(allocator: std.mem.Allocator) ![]const u8 {
     switch (builtin.os.tag) {
-        .linux, .macos => {
+        .linux, .macos, .freebsd => {
             return std.process.getEnvVarOwned(allocator, "TMPDIR") catch allocator.dupe(u8, "/tmp");
         },
         .windows => {

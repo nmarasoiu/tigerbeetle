@@ -10,6 +10,7 @@ const assert = std.debug.assert;
 const is_darwin = builtin.target.os.tag.isDarwin();
 const is_windows = builtin.target.os.tag == .windows;
 const is_linux = builtin.target.os.tag == .linux;
+const is_freebsd = builtin.target.os.tag == .freebsd;
 const Instant = stdx.Instant;
 
 pub const Time = struct {
@@ -66,6 +67,7 @@ pub const TimeOS = struct {
             if (is_windows) break :blk monotonic_windows();
             if (is_darwin) break :blk monotonic_darwin();
             if (is_linux) break :blk monotonic_linux();
+            if (is_freebsd) break :blk monotonic_freebsd();
             @compileError("unsupported OS");
         };
 
@@ -141,11 +143,25 @@ pub const TimeOS = struct {
         return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
     }
 
+    fn monotonic_freebsd() u64 {
+        assert(is_freebsd);
+        // FreeBSD's CLOCK_MONOTONIC excludes time while suspended, similar to Linux.
+        // CLOCK_UPTIME on FreeBSD is the equivalent of Linux's CLOCK_BOOTTIME -
+        // it represents time since boot including any time spent suspended.
+        // However, CLOCK_UPTIME_FAST is faster and sufficient for our purposes.
+        // We use CLOCK_MONOTONIC for now as it's the most portable and commonly used.
+        const ts: posix.timespec = posix.clock_gettime(posix.CLOCK.MONOTONIC) catch {
+            @panic("CLOCK_MONOTONIC required");
+        };
+        return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
+    }
+
     fn realtime(_: *anyopaque) i64 {
         if (is_windows) return realtime_windows();
         // macos has supported clock_gettime() since 10.12:
         // https://opensource.apple.com/source/Libc/Libc-1158.1.2/gen/clock_gettime.3.auto.html
-        if (is_darwin or is_linux) return realtime_unix();
+        // FreeBSD has always supported clock_gettime() with POSIX clocks.
+        if (is_darwin or is_linux or is_freebsd) return realtime_unix();
         @compileError("unsupported OS");
     }
 

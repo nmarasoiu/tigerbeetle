@@ -68,9 +68,9 @@ pub const JNIThreadCleaner = struct {
     }
 
     /// Thread-local storage abstraction,
-    /// based on `pthread_key_create` for Linux/MacOS and `FlsAlloc` for Windows.
+    /// based on `pthread_key_create` for Linux/MacOS/FreeBSD and `FlsAlloc` for Windows.
     const tls = switch (builtin.os.tag) {
-        .linux, .macos => struct {
+        .linux, .macos, .freebsd => struct {
             const Key = std.c.pthread_key_t;
 
             fn create_key(destructor: ?*const fn (value: *anyopaque) callconv(.c) void) Key {
