@@ -928,9 +928,9 @@ pub const IO = struct {
                     return;
                 }
 
-                // After write completes, sync to disk
-                // Note: This fsync is still synchronous, but the write was async
-                // For full async, we'd need aio_fsync with another EVFILT_AIO
+                // Explicit fsync for durability - goes to ZIL/SLOG on ZFS.
+                // Separation of concerns: aio_write = async data transfer,
+                // fsync = explicit "make durable now" call.
                 posix.fsync(op.fd) catch {
                     callback(
                         @ptrCast(@alignCast(_completion.context)),
@@ -1130,7 +1130,9 @@ pub const IO = struct {
         var flags: posix.O = .{
             .CLOEXEC = true,
             .ACCMODE = if (purpose == .inspect) .RDONLY else .RDWR,
-            .DSYNC = true,
+            // FreeBSD: We explicitly fsync() after writes rather than using O_DSYNC.
+            // This gives clear separation: aio_write = async data transfer,
+            // fsync = explicit durability to ZIL/SLOG. Each syscall does one thing.
         };
         var mode: posix.mode_t = 0;
 
@@ -1154,7 +1156,8 @@ pub const IO = struct {
             },
         }
 
-        assert(flags.DSYNC);
+        // Note: No O_DSYNC - we use explicit fsync() after writes for durability.
+        // This matches our principled approach: write = transfer, fsync = durable.
         assert(!std.fs.path.isAbsolute(relative_path));
         const fd = try posix.openat(dir_fd, relative_path, flags, mode);
         errdefer posix.close(fd);
