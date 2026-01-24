@@ -9,28 +9,34 @@
 
   tasks:
     - name: Wait for setup to complete
+      tags: [verify, setup]
       wait_for:
         path: /root/.setup_complete
         timeout: 300
 
     - name: Verify ZFS pool
+      tags: [verify, zfs]
       command: zpool status tbpool
       register: zpool_status
       changed_when: false
 
     - name: Display ZFS status
+      tags: [verify, zfs]
       debug:
         var: zpool_status.stdout_lines
 
     - name: Verify AIO module loaded
+      tags: [verify, aio]
       shell: kldstat | grep -q aio
       changed_when: false
 
     - name: Verify network configuration
+      tags: [verify, network]
       debug:
         msg: "{{ inventory_hostname }} is reachable at {{ ansible_host }}"
 
     - name: Install Zig
+      tags: [zig, install]
       block:
         - name: Check if Zig is installed
           command: zig version

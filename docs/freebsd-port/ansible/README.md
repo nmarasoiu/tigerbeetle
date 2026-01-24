@@ -40,12 +40,12 @@ ansible-playbook playbooks/04-cluster-ops.yml -e operation=start
 | `01-setup-host.yml` | Install KVM/libvirt, download FreeBSD image, create 3 VMs |
 | `02-configure-freebsd.yml` | Verify FreeBSD setup, install Zig |
 | `03-deploy-tigerbeetle.yml` | Clone, build, format cluster |
-| `04-cluster-ops.yml` | Start/stop/status operations |
+| `04-cluster-ops.yml` | Start/stop/status/restart operations |
 
 ## Cluster Operations
 
 ```bash
-# Check status
+# Check status (shows nice table like bash script)
 ansible-playbook playbooks/04-cluster-ops.yml -e operation=status
 
 # Start cluster
@@ -53,6 +53,61 @@ ansible-playbook playbooks/04-cluster-ops.yml -e operation=start
 
 # Stop cluster
 ansible-playbook playbooks/04-cluster-ops.yml -e operation=stop
+
+# Restart cluster
+ansible-playbook playbooks/04-cluster-ops.yml -e operation=restart
+```
+
+## Tags for Selective Execution
+
+Each playbook has tags for running specific parts:
+
+### 01-setup-host.yml
+```bash
+# Run only package installation
+ansible-playbook playbooks/01-setup-host.yml --tags packages --ask-become-pass
+
+# Run only VM creation
+ansible-playbook playbooks/01-setup-host.yml --tags vms --ask-become-pass
+
+# Run only image download
+ansible-playbook playbooks/01-setup-host.yml --tags download --ask-become-pass
+```
+
+Available tags: `preflight`, `packages`, `setup`, `libvirt`, `network`, `image`, `download`, `vms`, `create`, `wait`
+
+### 02-configure-freebsd.yml
+```bash
+# Run only verification
+ansible-playbook playbooks/02-configure-freebsd.yml --tags verify
+
+# Run only Zig installation
+ansible-playbook playbooks/02-configure-freebsd.yml --tags zig
+```
+
+Available tags: `verify`, `setup`, `zfs`, `aio`, `network`, `zig`, `install`
+
+### 03-deploy-tigerbeetle.yml
+```bash
+# Run only build
+ansible-playbook playbooks/03-deploy-tigerbeetle.yml --tags build
+
+# Run only distribution
+ansible-playbook playbooks/03-deploy-tigerbeetle.yml --tags distribute
+
+# Run only format
+ansible-playbook playbooks/03-deploy-tigerbeetle.yml --tags format
+```
+
+Available tags: `clone`, `build`, `verify`, `distribute`, `format`
+
+### 04-cluster-ops.yml
+```bash
+# Tags match operation names
+ansible-playbook playbooks/04-cluster-ops.yml --tags status
+ansible-playbook playbooks/04-cluster-ops.yml --tags start
+ansible-playbook playbooks/04-cluster-ops.yml --tags stop
+ansible-playbook playbooks/04-cluster-ops.yml --tags restart
 ```
 
 ## Configuration
@@ -90,6 +145,15 @@ ansible freebsd_cluster -m shell -a "tail -20 /var/log/tigerbeetle.log"
 ansible freebsd_cluster -m reboot
 ```
 
+## Dry Run
+
+Test what would change without making changes:
+
+```bash
+ansible-playbook playbooks/01-setup-host.yml --check --ask-become-pass
+ansible-playbook playbooks/02-configure-freebsd.yml --check
+```
+
 ## Comparison to Bash Script
 
 | Aspect | Bash | Ansible |
@@ -100,3 +164,4 @@ ansible freebsd_cluster -m reboot
 | Parallel execution | Tricky | `serial: N` or async |
 | Configuration | Hardcoded variables | `group_vars/` + inventory |
 | Dry run | Not possible | `--check` flag |
+| Selective execution | Not possible | `--tags` flag |

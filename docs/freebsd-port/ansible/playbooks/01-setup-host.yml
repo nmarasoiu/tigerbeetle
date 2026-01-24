@@ -12,6 +12,7 @@
     # PREFLIGHT CHECKS
     # =========================================
     - name: Check CPU virtualization support
+      tags: [preflight, always]
       shell: grep -cE '(vmx|svm)' /proc/cpuinfo
       register: virt_check
       changed_when: false
@@ -21,6 +22,7 @@
     # INSTALL DEPENDENCIES
     # =========================================
     - name: Install KVM and libvirt packages
+      tags: [packages, setup]
       apt:
         name:
           - qemu-kvm
@@ -37,12 +39,14 @@
         update_cache: yes
 
     - name: Enable and start libvirtd
+      tags: [libvirt, setup]
       systemd:
         name: libvirtd
         enabled: yes
         state: started
 
     - name: Ensure default network exists
+      tags: [libvirt, network, setup]
       community.libvirt.virt_net:
         name: default
         state: active
@@ -53,17 +57,20 @@
     # DOWNLOAD FREEBSD IMAGE
     # =========================================
     - name: Create work directory
+      tags: [image, download]
       file:
         path: "{{ work_dir }}"
         state: directory
         mode: '0755'
 
     - name: Check if base image exists
+      tags: [image, download]
       stat:
         path: "{{ work_dir }}/{{ freebsd_base_image }}"
       register: base_image
 
     - name: Download FreeBSD image
+      tags: [image, download]
       get_url:
         url: "{{ freebsd_image_url }}"
         dest: "{{ work_dir }}/{{ freebsd_image_filename }}"
@@ -71,6 +78,7 @@
       when: not base_image.stat.exists
 
     - name: Decompress FreeBSD image
+      tags: [image, download]
       shell: |
         cd {{ work_dir }}
         xz -dkv {{ freebsd_image_filename }}
@@ -82,6 +90,7 @@
     # CREATE VMs
     # =========================================
     - name: Create VMs
+      tags: [vms, create]
       include_tasks: ../tasks/create-vm.yml
       loop: "{{ groups['freebsd_cluster'] }}"
       loop_control:
@@ -91,6 +100,7 @@
     # WAIT FOR VMs
     # =========================================
     - name: Wait for VMs to be reachable
+      tags: [vms, wait]
       wait_for:
         host: "{{ hostvars[item].ansible_host }}"
         port: 22
@@ -99,6 +109,7 @@
       loop: "{{ groups['freebsd_cluster'] }}"
 
     - name: Display completion message
+      tags: [always]
       debug:
         msg: |
           ========================================

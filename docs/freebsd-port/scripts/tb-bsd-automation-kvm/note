@@ -27,3 +27,30 @@
   - Mount: /tbdata
 
   This gives you OpenZFS 2.4 with full O_DIRECT support for comparing AIO+kqueue vs io_uring.
+----
+
+  Changes Made
+  ┌─────────────────────────────────────┬──────────────────────────────────────────────────────────────────────────────────────────────┐
+  │                File                 │                                            Change                                            │
+  ├─────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ tasks/create-vm.yml                 │ Fixed --os-variant freebsd14.0 → freebsd15.0                                                 │
+  ├─────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ playbooks/01-setup-host.yml         │ Added tags: preflight, packages, setup, libvirt, network, image, download, vms, create, wait │
+  ├─────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ playbooks/02-configure-freebsd.yml  │ Added tags: verify, setup, zfs, aio, network, zig, install                                   │
+  ├─────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ playbooks/03-deploy-tigerbeetle.yml │ Added tags: clone, build, verify, distribute, format                                         │
+  ├─────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ playbooks/04-cluster-ops.yml        │ Added restart operation, nice status table output, tags for all operations                   │
+  ├─────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ README.md                           │ Documented tags, new restart operation, dry run examples                                     │
+  ├─────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ note                                │ Removed (redundant, merged into README)                                                      │
+  └─────────────────────────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────┘
+  Key Improvements
+
+  1. OS variant fix - Now correctly uses freebsd15.0 to match the image
+  2. Tags - Can now run selective parts of playbooks with --tags
+  3. Restart operation - New -e operation=restart
+  4. Status table - Matches bash script's nice table format
+  5. Cleaner docs - README now comprehensive, removed redundant note file

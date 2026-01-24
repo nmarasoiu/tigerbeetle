@@ -20,20 +20,35 @@
     # STATUS
     # =========================================
     - name: Check TigerBeetle process
+      tags: [status]
       shell: pgrep -x tigerbeetle || echo "not running"
       register: tb_process
       changed_when: false
       when: operation == "status"
 
-    - name: Display status
-      debug:
-        msg: "{{ inventory_hostname }} ({{ ansible_host }}): {{ 'RUNNING' if tb_process.stdout != 'not running' else 'STOPPED' }}"
+    - name: Check VM state via virsh
+      tags: [status]
+      delegate_to: localhost
+      shell: virsh domstate {{ inventory_hostname }} 2>/dev/null || echo "unknown"
+      register: vm_state
+      changed_when: false
+      when: operation == "status"
+
+    - name: Store status facts
+      tags: [status]
+      set_fact:
+        node_status:
+          name: "{{ inventory_hostname }}"
+          ip: "{{ ansible_host }}"
+          vm_state: "{{ vm_state.stdout | default('unknown') | trim }}"
+          tb_status: "{{ 'running' if tb_process.stdout != 'not running' else 'stopped' }}"
       when: operation == "status"
 
     # =========================================
     # START
     # =========================================
     - name: Check if already running
+      tags: [start]
       shell: pgrep -x tigerbeetle
       register: already_running
       ignore_errors: yes
@@ -41,6 +56,7 @@
       when: operation == "start"
 
     - name: Start TigerBeetle
+      tags: [start]
       shell: |
         nohup {{ tb_binary }} start \
           --addresses={{ cluster_addresses }} \
@@ -52,6 +68,7 @@
       register: start_result
 
     - name: Display start status
+      tags: [start]
       debug:
         msg: "{{ inventory_hostname }}: Started (PID {{ start_result.stdout | default('already running') }})"
       when: operation == "start"
@@ -60,27 +77,109 @@
     # STOP
     # =========================================
     - name: Stop TigerBeetle
+      tags: [stop]
       shell: pkill -x tigerbeetle || true
       when: operation == "stop"
 
     - name: Display stop status
+      tags: [stop]
       debug:
         msg: "{{ inventory_hostname }}: Stopped"
       when: operation == "stop"
+
+    # =========================================
+    # RESTART (stop + start)
+    # =========================================
+    - name: Stop TigerBeetle for restart
+      tags: [restart]
+      shell: pkill -x tigerbeetle || true
+      when: operation == "restart"
+
+    - name: Wait for process to stop
+      tags: [restart]
+      pause:
+        seconds: 2
+      when: operation == "restart"
+
+    - name: Start TigerBeetle after restart
+      tags: [restart]
+      shell: |
+        nohup {{ tb_binary }} start \
+          --addresses={{ cluster_addresses }} \
+          {{ tb_datafile }} \
+          > {{ tb_logfile }} 2>&1 &
+        sleep 2
+        pgrep -x tigerbeetle
+      when: operation == "restart"
+      register: restart_result
+
+    - name: Display restart status
+      tags: [restart]
+      debug:
+        msg: "{{ inventory_hostname }}: Restarted (PID {{ restart_result.stdout }})"
+      when: operation == "restart"
 
 
 - name: Display cluster summary
   hosts: localhost
   gather_facts: no
+
   tasks:
-    - name: Cluster addresses
+    # =========================================
+    # STATUS TABLE (like bash script)
+    # =========================================
+    - name: Display status table
+      tags: [status]
+      debug:
+        msg: |
+
+          VM               State        IP              TB
+          -------------    ----------   -------------   --------
+          {% for host in groups['freebsd_cluster'] %}
+          {{ "%-16s" | format(host) }} {{ "%-12s" | format(hostvars[host].node_status.vm_state) }} {{ "%-15s" | format(hostvars[host].node_status.ip) }} {{ hostvars[host].node_status.tb_status }}
+          {% endfor %}
+      when: operation == "status"
+
+    # =========================================
+    # START SUMMARY
+    # =========================================
+    - name: Cluster start summary
+      tags: [start]
       debug:
         msg: |
           ========================================
-          TigerBeetle Cluster
+          TigerBeetle Cluster Started
           ========================================
           Addresses: {{ cluster_addresses }}
 
           Connect with:
             tigerbeetle repl --addresses={{ cluster_addresses }}
       when: operation == "start"
+
+    # =========================================
+    # STOP SUMMARY
+    # =========================================
+    - name: Cluster stop summary
+      tags: [stop]
+      debug:
+        msg: |
+          ========================================
+          TigerBeetle Cluster Stopped
+          ========================================
+      when: operation == "stop"
+
+    # =========================================
+    # RESTART SUMMARY
+    # =========================================
+    - name: Cluster restart summary
+      tags: [restart]
+      debug:
+        msg: |
+          ========================================
+          TigerBeetle Cluster Restarted
+          ========================================
+          Addresses: {{ cluster_addresses }}
+
+          Connect with:
+            tigerbeetle repl --addresses={{ cluster_addresses }}
+      when: operation == "restart"

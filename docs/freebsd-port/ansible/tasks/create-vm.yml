@@ -67,7 +67,7 @@
         --disk path={{ boot_disk }},format=qcow2,bus=virtio
         --disk path={{ data_disk }},format=qcow2,bus=virtio
         --network network=default,model=virtio
-        --os-variant freebsd14.0
+        --os-variant freebsd15.0
         --import
         --graphics none
         --noautoconsole

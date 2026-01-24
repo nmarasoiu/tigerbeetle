@@ -9,6 +9,7 @@
 
   tasks:
     - name: Clone TigerBeetle repository
+      tags: [clone, build]
       git:
         repo: "{{ tb_fork_url }}"
         dest: /root/tigerbeetle
@@ -16,20 +17,24 @@
         force: yes
 
     - name: Build TigerBeetle
+      tags: [build]
       command: zig build -Doptimize=ReleaseSafe
       args:
         chdir: /root/tigerbeetle
       register: build_result
 
     - name: Verify build
+      tags: [build, verify]
       command: /root/tigerbeetle/zig-out/bin/tigerbeetle version
       register: tb_version
 
     - name: Display TigerBeetle version
+      tags: [build, verify]
       debug:
         msg: "Built: {{ tb_version.stdout }}"
 
     - name: Fetch binary to control node
+      tags: [distribute]
       fetch:
         src: /root/tigerbeetle/zig-out/bin/tigerbeetle
         dest: /tmp/tigerbeetle-freebsd
@@ -39,15 +44,18 @@
 - name: Distribute TigerBeetle to other nodes
   hosts: freebsd_cluster:!tb-freebsd-0
   gather_facts: no
+  tags: [distribute]
 
   tasks:
     - name: Create tigerbeetle directory
+      tags: [distribute]
       file:
         path: /root/tigerbeetle/zig-out/bin
         state: directory
         mode: '0755'
 
     - name: Copy TigerBeetle binary
+      tags: [distribute]
       copy:
         src: /tmp/tigerbeetle-freebsd
         dest: /root/tigerbeetle/zig-out/bin/tigerbeetle
@@ -58,6 +66,7 @@
   hosts: freebsd_cluster
   gather_facts: no
   serial: 1  # One at a time
+  tags: [format]
 
   vars:
     tb_binary: /root/tigerbeetle/zig-out/bin/tigerbeetle
@@ -65,11 +74,13 @@
 
   tasks:
     - name: Check if data file exists
+      tags: [format]
       stat:
         path: "{{ tb_datafile }}"
       register: datafile
 
     - name: Format replica
+      tags: [format]
       command: >
         {{ tb_binary }} format
         --cluster=0
@@ -79,5 +90,6 @@
       when: not datafile.stat.exists
 
     - name: Display format status
+      tags: [format]
       debug:
         msg: "Replica {{ replica_id }} formatted: {{ tb_datafile }}"
