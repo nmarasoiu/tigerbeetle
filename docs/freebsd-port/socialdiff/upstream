@@ -1,0 +1,27 @@
+The io_uring security dilemma. And a serious non-blocking alternative
+
+60% of Google's kernel exploit bounties targeted io_uring with attacks like ROP. Docker disabled it by default. Same decision for Android and ChromeOS. Google's own servers disabled it.
+
+Yet high-performance databases are building on io_uring as their fast I/O path. TigerBeetle, parts of ScyllaDB, and many others have deep io_uring dependencies.
+
+What happens when your security team says "no io_uring"? You fall back to synchronous I/O. Performance tanks.
+
+But there is a truly non-blocking, battle-tested alternative.
+
+FreeBSD AIO + kqueue provides the same completion-based async I/O model. It is truly kernel-level non-blocking (not a thread-pool simulation) and comes with 25 years of security hardening instead of 5 years of CVEs.
+
+• Netflix serves 30% of US internet traffic on FreeBSD.
+• WhatsApp handled 2M concurrent connections per server on FreeBSD.
+• ZFS 2.3 added O_DIRECT support, closing the last performance gap.
+
+I've been exploring this architecture for a TigerBeetle database port. The deep-dive revealed something surprising: the technical foundation is solid, validated by PostgreSQL's core team, and production-proven at massive scale.
+
+Full technical analysis: https://lnkd.in/eXbs2WA5
+
+FreeBSD AIO + kqueue + ZFS provides a security-conscious alternative to Linux io_uring.
+
+The syscall overhead is a performance tradeoff, but for security-sensitive deployments, this is the correct path.
+
+Curious what database engineers and security folks think. Is this a real concern in your environment? Have you had to disable io_uring?
+
+#databases #security #freebsd #linux #systemsprogramming #postgresql #tigerbeetle #io #OLTP #iouring #bsd #CVE
