@@ -1,0 +1,23 @@
+
+⏺ I've reviewed both files. Here's my high-level understanding:
+
+  TigerBeetle FreeBSD Port Summary
+
+  Architecture Document outlines:
+  - io_uring security concerns (60% of Google's kernel exploit bounties)
+  - FreeBSD AIO + kqueue as a mature alternative with 25+ years of hardening
+  - Completion-based async I/O model (same as io_uring conceptually)
+  - ZFS 2.3+ O_DIRECT support closing the performance gap
+  - PostgreSQL actively validating this same approach
+
+  The Zig Implementation (freebsd.zig) implements:
+  - Native AIO via aio_read/aio_write with proper aiocb struct definitions
+  - kqueue integration using EVFILT_AIO (-3) filter for completion notifications
+  - SIGEV_KEVENT for event delivery to kqueue (lines 417-420)
+  - O_DSYNC on file open for write durability (same invariant as Linux path)
+  - Proper error handling with submit_failed flags
+
+  The approach is sound - this is genuine kernel-level async I/O, not a thread pool simulation.
+
+  ---
+  Now let me search for details on PostgreSQL's FreeBSD AIO work.
