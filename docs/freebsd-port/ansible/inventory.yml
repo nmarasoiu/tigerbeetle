@@ -1,0 +1,29 @@
+---
+# TigerBeetle FreeBSD Cluster Inventory
+
+all:
+  children:
+    # The Ubuntu host running KVM/libvirt
+    hypervisor:
+      hosts:
+        localhost:
+          ansible_connection: local
+          ansible_python_interpreter: /usr/bin/python3
+
+    # FreeBSD VMs (created by the hypervisor playbook)
+    freebsd_cluster:
+      hosts:
+        tb-freebsd-0:
+          ansible_host: 192.168.122.10
+          replica_id: 0
+        tb-freebsd-1:
+          ansible_host: 192.168.122.11
+          replica_id: 1
+        tb-freebsd-2:
+          ansible_host: 192.168.122.12
+          replica_id: 2
+      vars:
+        ansible_user: root
+        ansible_password: root
+        ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+        ansible_python_interpreter: /usr/local/bin/python3

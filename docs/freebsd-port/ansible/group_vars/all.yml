@@ -1,0 +1,37 @@
+---
+# TigerBeetle FreeBSD Cluster Configuration
+
+# FreeBSD Image
+freebsd_version: "15.0-RELEASE"
+freebsd_image_url: "https://download.freebsd.org/ftp/releases/VM-IMAGES/15.0-RELEASE/amd64/Latest/FreeBSD-15.0-RELEASE-amd64-zfs.qcow2.xz"
+freebsd_image_filename: "FreeBSD-15.0-RELEASE-amd64-zfs.qcow2.xz"
+freebsd_base_image: "FreeBSD-15.0-RELEASE-amd64-zfs.qcow2"
+
+# Paths
+work_dir: "{{ ansible_env.HOME }}/tigerbeetle-freebsd"
+libvirt_images: "/var/lib/libvirt/images"
+
+# VM Resources
+vm_ram_mb: 4096
+vm_vcpus: 2
+vm_disk_size: "20G"
+vm_data_disk_size: "50G"
+
+# Network
+gateway: "192.168.122.1"
+netmask: "255.255.255.0"
+dns_servers:
+  - "8.8.8.8"
+  - "8.8.4.4"
+
+# TigerBeetle
+tb_fork_url: "https://github.com/nmarasoiu/tigerbeetle.git"
+tb_branch: "freebsd-port"
+tb_data_path: "/tbdata/tigerbeetle/data"
+tb_port: 3001
+
+# Zig
+zig_version: "0.14.1"
+
+# Cluster addresses (computed from inventory)
+cluster_addresses: "{{ groups['freebsd_cluster'] | map('extract', hostvars, 'ansible_host') | map('regex_replace', '$', ':' ~ tb_port) | join(',') }}"

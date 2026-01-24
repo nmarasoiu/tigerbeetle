@@ -1,0 +1,73 @@
+---
+# Task: Create a single FreeBSD VM
+# Called with: vm_name (e.g., tb-freebsd-0)
+
+- name: "{{ vm_name }} - Check if VM exists"
+  community.libvirt.virt:
+    command: info
+    name: "{{ vm_name }}"
+  register: vm_info
+  ignore_errors: yes
+
+- name: "{{ vm_name }} - Skip if exists"
+  debug:
+    msg: "VM {{ vm_name }} already exists, skipping"
+  when: vm_info is succeeded
+
+- name: "{{ vm_name }} - Create VM"
+  when: vm_info is failed
+  block:
+    - name: "{{ vm_name }} - Set VM facts"
+      set_fact:
+        vm_ip: "{{ hostvars[vm_name].ansible_host }}"
+        vm_replica_id: "{{ hostvars[vm_name].replica_id }}"
+        boot_disk: "{{ libvirt_images }}/{{ vm_name }}.qcow2"
+        data_disk: "{{ libvirt_images }}/{{ vm_name }}-data.qcow2"
+
+    - name: "{{ vm_name }} - Copy base image to boot disk"
+      copy:
+        src: "{{ work_dir }}/{{ freebsd_base_image }}"
+        dest: "{{ boot_disk }}"
+        remote_src: yes
+        mode: '0644'
+
+    - name: "{{ vm_name }} - Resize boot disk"
+      command: qemu-img resize {{ boot_disk }} {{ vm_disk_size }}
+
+    - name: "{{ vm_name }} - Create data disk"
+      command: qemu-img create -f qcow2 {{ data_disk }} {{ vm_data_disk_size }}
+      args:
+        creates: "{{ data_disk }}"
+
+    - name: "{{ vm_name }} - Generate setup script"
+      template:
+        src: ../templates/freebsd-setup.sh.j2
+        dest: "{{ work_dir }}/setup-{{ vm_name }}.sh"
+        mode: '0755'
+
+    - name: "{{ vm_name }} - Customize image with virt-customize"
+      environment:
+        LIBGUESTFS_BACKEND: direct
+      command: >
+        virt-customize -a {{ boot_disk }}
+        --run-command 'echo "console=\"comconsole\"" >> /boot/loader.conf'
+        --run-command 'echo "autoboot_delay=\"0\"" >> /boot/loader.conf'
+        --upload {{ work_dir }}/setup-{{ vm_name }}.sh:/root/setup.sh
+        --run-command 'chmod +x /root/setup.sh'
+        --run-command 'echo "/root/setup.sh >> /var/log/setup.log 2>&1" >> /etc/rc.local'
+        --run-command 'chmod +x /etc/rc.local'
+        --root-password password:root
+
+    - name: "{{ vm_name }} - Create VM with virt-install"
+      command: >
+        virt-install
+        --name {{ vm_name }}
+        --ram {{ vm_ram_mb }}
+        --vcpus {{ vm_vcpus }}
+        --disk path={{ boot_disk }},format=qcow2,bus=virtio
+        --disk path={{ data_disk }},format=qcow2,bus=virtio
+        --network network=default,model=virtio
+        --os-variant freebsd14.0
+        --import
+        --graphics none
+        --noautoconsole

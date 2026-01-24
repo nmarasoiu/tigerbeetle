@@ -1,0 +1,86 @@
+---
+# Playbook: TigerBeetle Cluster Operations
+#
+# Start:  ansible-playbook playbooks/04-cluster-ops.yml -e operation=start
+# Stop:   ansible-playbook playbooks/04-cluster-ops.yml -e operation=stop
+# Status: ansible-playbook playbooks/04-cluster-ops.yml -e operation=status
+
+- name: TigerBeetle Cluster Operations
+  hosts: freebsd_cluster
+  gather_facts: no
+
+  vars:
+    operation: status  # default
+    tb_binary: /root/tigerbeetle/zig-out/bin/tigerbeetle
+    tb_datafile: "{{ tb_data_path }}/0_{{ replica_id }}.tigerbeetle"
+    tb_logfile: /var/log/tigerbeetle.log
+
+  tasks:
+    # =========================================
+    # STATUS
+    # =========================================
+    - name: Check TigerBeetle process
+      shell: pgrep -x tigerbeetle || echo "not running"
+      register: tb_process
+      changed_when: false
+      when: operation == "status"
+
+    - name: Display status
+      debug:
+        msg: "{{ inventory_hostname }} ({{ ansible_host }}): {{ 'RUNNING' if tb_process.stdout != 'not running' else 'STOPPED' }}"
+      when: operation == "status"
+
+    # =========================================
+    # START
+    # =========================================
+    - name: Check if already running
+      shell: pgrep -x tigerbeetle
+      register: already_running
+      ignore_errors: yes
+      changed_when: false
+      when: operation == "start"
+
+    - name: Start TigerBeetle
+      shell: |
+        nohup {{ tb_binary }} start \
+          --addresses={{ cluster_addresses }} \
+          {{ tb_datafile }} \
+          > {{ tb_logfile }} 2>&1 &
+        sleep 2
+        pgrep -x tigerbeetle
+      when: operation == "start" and already_running is failed
+      register: start_result
+
+    - name: Display start status
+      debug:
+        msg: "{{ inventory_hostname }}: Started (PID {{ start_result.stdout | default('already running') }})"
+      when: operation == "start"
+
+    # =========================================
+    # STOP
+    # =========================================
+    - name: Stop TigerBeetle
+      shell: pkill -x tigerbeetle || true
+      when: operation == "stop"
+
+    - name: Display stop status
+      debug:
+        msg: "{{ inventory_hostname }}: Stopped"
+      when: operation == "stop"
+
+
+- name: Display cluster summary
+  hosts: localhost
+  gather_facts: no
+  tasks:
+    - name: Cluster addresses
+      debug:
+        msg: |
+          ========================================
+          TigerBeetle Cluster
+          ========================================
+          Addresses: {{ cluster_addresses }}
+
+          Connect with:
+            tigerbeetle repl --addresses={{ cluster_addresses }}
+      when: operation == "start"

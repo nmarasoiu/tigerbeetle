@@ -1,0 +1,20 @@
+
+  Usage on your Ubuntu box:
+
+  # One-time setup
+  sudo apt install ansible python3-libvirt python3-lxml
+  ansible-galaxy collection install community.libvirt
+
+  # Run
+  cd docs/freebsd-port/ansible
+  ansible-playbook playbooks/01-setup-host.yml --ask-become-pass
+  ansible-playbook playbooks/02-configure-freebsd.yml
+  ansible-playbook playbooks/03-deploy-tigerbeetle.yml
+  ansible-playbook playbooks/04-cluster-ops.yml -e operation=start
+
+  Key wins over bash:
+  - Idempotent: Re-run safely, skips already-done work
+  - SSH native: No more ssh root@... "command" loops
+  - --check flag: Dry run to see what would change
+  - Config separated: group_vars/all.yml instead of hardcoded variables scattered through script
+  - Parallelism built-in: Can run on all nodes simultaneously

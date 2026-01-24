@@ -1,0 +1,116 @@
+---
+# Playbook: Setup Ubuntu Host with KVM/libvirt and create FreeBSD VMs
+#
+# Run: ansible-playbook playbooks/01-setup-host.yml --ask-become-pass
+
+- name: Setup KVM Host and Create FreeBSD VMs
+  hosts: hypervisor
+  become: yes
+
+  tasks:
+    # =========================================
+    # PREFLIGHT CHECKS
+    # =========================================
+    - name: Check CPU virtualization support
+      shell: grep -cE '(vmx|svm)' /proc/cpuinfo
+      register: virt_check
+      changed_when: false
+      failed_when: virt_check.stdout | int == 0
+
+    # =========================================
+    # INSTALL DEPENDENCIES
+    # =========================================
+    - name: Install KVM and libvirt packages
+      apt:
+        name:
+          - qemu-kvm
+          - libvirt-daemon-system
+          - libvirt-clients
+          - virtinst
+          - bridge-utils
+          - wget
+          - xz-utils
+          - libguestfs-tools
+          - python3-libvirt
+          - python3-lxml
+        state: present
+        update_cache: yes
+
+    - name: Enable and start libvirtd
+      systemd:
+        name: libvirtd
+        enabled: yes
+        state: started
+
+    - name: Ensure default network exists
+      community.libvirt.virt_net:
+        name: default
+        state: active
+        autostart: yes
+      ignore_errors: yes  # May already exist
+
+    # =========================================
+    # DOWNLOAD FREEBSD IMAGE
+    # =========================================
+    - name: Create work directory
+      file:
+        path: "{{ work_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Check if base image exists
+      stat:
+        path: "{{ work_dir }}/{{ freebsd_base_image }}"
+      register: base_image
+
+    - name: Download FreeBSD image
+      get_url:
+        url: "{{ freebsd_image_url }}"
+        dest: "{{ work_dir }}/{{ freebsd_image_filename }}"
+        mode: '0644'
+      when: not base_image.stat.exists
+
+    - name: Decompress FreeBSD image
+      shell: |
+        cd {{ work_dir }}
+        xz -dkv {{ freebsd_image_filename }}
+      args:
+        creates: "{{ work_dir }}/{{ freebsd_base_image }}"
+      when: not base_image.stat.exists
+
+    # =========================================
+    # CREATE VMs
+    # =========================================
+    - name: Create VMs
+      include_tasks: ../tasks/create-vm.yml
+      loop: "{{ groups['freebsd_cluster'] }}"
+      loop_control:
+        loop_var: vm_name
+
+    # =========================================
+    # WAIT FOR VMs
+    # =========================================
+    - name: Wait for VMs to be reachable
+      wait_for:
+        host: "{{ hostvars[item].ansible_host }}"
+        port: 22
+        delay: 30
+        timeout: 600
+      loop: "{{ groups['freebsd_cluster'] }}"
+
+    - name: Display completion message
+      debug:
+        msg: |
+          ========================================
+          VMs CREATED SUCCESSFULLY
+          ========================================
+
+          VMs:
+          {% for host in groups['freebsd_cluster'] %}
+            {{ host }}: {{ hostvars[host].ansible_host }}
+          {% endfor %}
+
+          Root password: root
+          Work dir: {{ work_dir }}
+
+          NEXT: Run playbooks/02-configure-freebsd.yml

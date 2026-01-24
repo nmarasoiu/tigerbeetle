@@ -1,0 +1,83 @@
+---
+# Playbook: Build and Deploy TigerBeetle
+#
+# Run: ansible-playbook playbooks/03-deploy-tigerbeetle.yml
+
+- name: Build TigerBeetle on first node
+  hosts: tb-freebsd-0
+  gather_facts: no
+
+  tasks:
+    - name: Clone TigerBeetle repository
+      git:
+        repo: "{{ tb_fork_url }}"
+        dest: /root/tigerbeetle
+        version: "{{ tb_branch }}"
+        force: yes
+
+    - name: Build TigerBeetle
+      command: zig build -Doptimize=ReleaseSafe
+      args:
+        chdir: /root/tigerbeetle
+      register: build_result
+
+    - name: Verify build
+      command: /root/tigerbeetle/zig-out/bin/tigerbeetle version
+      register: tb_version
+
+    - name: Display TigerBeetle version
+      debug:
+        msg: "Built: {{ tb_version.stdout }}"
+
+    - name: Fetch binary to control node
+      fetch:
+        src: /root/tigerbeetle/zig-out/bin/tigerbeetle
+        dest: /tmp/tigerbeetle-freebsd
+        flat: yes
+
+
+- name: Distribute TigerBeetle to other nodes
+  hosts: freebsd_cluster:!tb-freebsd-0
+  gather_facts: no
+
+  tasks:
+    - name: Create tigerbeetle directory
+      file:
+        path: /root/tigerbeetle/zig-out/bin
+        state: directory
+        mode: '0755'
+
+    - name: Copy TigerBeetle binary
+      copy:
+        src: /tmp/tigerbeetle-freebsd
+        dest: /root/tigerbeetle/zig-out/bin/tigerbeetle
+        mode: '0755'
+
+
+- name: Format TigerBeetle cluster
+  hosts: freebsd_cluster
+  gather_facts: no
+  serial: 1  # One at a time
+
+  vars:
+    tb_binary: /root/tigerbeetle/zig-out/bin/tigerbeetle
+    tb_datafile: "{{ tb_data_path }}/0_{{ replica_id }}.tigerbeetle"
+
+  tasks:
+    - name: Check if data file exists
+      stat:
+        path: "{{ tb_datafile }}"
+      register: datafile
+
+    - name: Format replica
+      command: >
+        {{ tb_binary }} format
+        --cluster=0
+        --replica={{ replica_id }}
+        --replica-count=3
+        {{ tb_datafile }}
+      when: not datafile.stat.exists
+
+    - name: Display format status
+      debug:
+        msg: "Replica {{ replica_id }} formatted: {{ tb_datafile }}"
