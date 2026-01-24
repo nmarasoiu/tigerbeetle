@@ -1,0 +1,29 @@
+
+⏺ The script is now parameterized. Here's the summary of changes:
+
+  New command-line interface:
+  # FreeBSD 15.0 with ZFS (OpenZFS 2.4 with O_DIRECT support)
+  ./tigerbeetle-freebsd-complete-merged.sh --version=15.0-RELEASE --rootfs=zfs
+
+  # FreeBSD 14.3 with UFS
+  ./tigerbeetle-freebsd-complete-merged.sh --version=14.3-RELEASE --rootfs=ufs
+
+  # With local image (you already downloaded on Mac)
+  ./tigerbeetle-freebsd-complete-merged.sh --version=15.0-RELEASE --rootfs=zfs \
+      --image=/path/to/FreeBSD-15.0-RELEASE-amd64-zfs.qcow2.xz
+
+  Key changes:
+  1. Required params: --version and --rootfs (explicit, no guessing)
+  2. Optional: --image for local pre-downloaded images
+  3. Version-aware URL patterns: 14.x uses no suffix, 15.x uses -ufs/-zfs
+  4. Storage setup: Conditionally creates UFS filesystem or ZFS pool (tbpool) based on --rootfs
+  5. Dynamic os-variant: Uses freebsd14.0 or freebsd15.0 for virt-install
+
+  For your ZFS + O_DIRECT testing on FreeBSD 15.0:
+
+  The ZFS setup creates:
+  - Pool: tbpool (ashift=12, compression=lz4, atime=off)
+  - Dataset: tbpool/tigerbeetle/data
+  - Mount: /tbdata
+
+  This gives you OpenZFS 2.4 with full O_DIRECT support for comparing AIO+kqueue vs io_uring.

@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # TigerBeetle FreeBSD Port - Complete Automated KVM Environment
-# Strategy: UFS + Soft Updates + POSIX AIO + kqueue
+# Strategy: UFS/ZFS + Soft Updates + POSIX AIO + kqueue
 #
 # MERGED VERSION: Combines manual completeness with automated injection
 #
@@ -11,19 +11,118 @@
 # Features from both scripts:
 #   - Automated VM configuration via libguestfs (no manual console login)
 #   - Complete helper scripts (chaos, benchmark, cluster management)
-#   - Latest FreeBSD 14.3 and Zig 0.14.1
 #   - SSH root login pre-configured
 #   - Sentinel check prevents re-runs
+#
+# Usage:
+#   ./tigerbeetle-freebsd-complete-merged.sh --version=15.0-RELEASE --rootfs=zfs [--image=/path/to/image.qcow2.xz]
+#   ./tigerbeetle-freebsd-complete-merged.sh --version=14.3-RELEASE --rootfs=ufs
+#
+# Parameters:
+#   --version   FreeBSD version (e.g., 14.3-RELEASE, 15.0-RELEASE)
+#   --rootfs    Root filesystem type: ufs or zfs
+#   --image     (Optional) Local path to qcow2.xz image. If not provided, downloads from FreeBSD.
 #
 
 set -e
 
 #############################################
+# PARSE COMMAND LINE ARGUMENTS
+#############################################
+
+FREEBSD_VERSION=""
+FREEBSD_ROOTFS=""
+LOCAL_IMAGE_PATH=""
+
+usage() {
+    echo "Usage: $0 --version=<VERSION> --rootfs=<ufs|zfs> [--image=<path>]"
+    echo ""
+    echo "Examples:"
+    echo "  $0 --version=15.0-RELEASE --rootfs=zfs"
+    echo "  $0 --version=14.3-RELEASE --rootfs=ufs"
+    echo "  $0 --version=15.0-RELEASE --rootfs=zfs --image=/home/user/FreeBSD-15.0-RELEASE-amd64-zfs.qcow2.xz"
+    echo ""
+    echo "Parameters:"
+    echo "  --version   FreeBSD version (e.g., 14.3-RELEASE, 15.0-RELEASE)"
+    echo "  --rootfs    Root filesystem type: ufs or zfs"
+    echo "  --image     (Optional) Local path to .qcow2.xz image file"
+    exit 1
+}
+
+for arg in "$@"; do
+    case $arg in
+        --version=*)
+            FREEBSD_VERSION="${arg#*=}"
+            ;;
+        --rootfs=*)
+            FREEBSD_ROOTFS="${arg#*=}"
+            ;;
+        --image=*)
+            LOCAL_IMAGE_PATH="${arg#*=}"
+            ;;
+        --help|-h)
+            usage
+            ;;
+        *)
+            echo "Unknown argument: $arg"
+            usage
+            ;;
+    esac
+done
+
+# Validate required parameters
+if [[ -z "$FREEBSD_VERSION" ]]; then
+    echo "Error: --version is required"
+    usage
+fi
+
+if [[ -z "$FREEBSD_ROOTFS" ]]; then
+    echo "Error: --rootfs is required (ufs or zfs)"
+    usage
+fi
+
+if [[ "$FREEBSD_ROOTFS" != "ufs" && "$FREEBSD_ROOTFS" != "zfs" ]]; then
+    echo "Error: --rootfs must be 'ufs' or 'zfs', got: $FREEBSD_ROOTFS"
+    usage
+fi
+
+#############################################
 # CONFIGURATION
 #############################################
 
-FREEBSD_VERSION="14.3-RELEASE"
-FREEBSD_IMAGE_URL="https://download.freebsd.org/ftp/releases/VM-IMAGES/${FREEBSD_VERSION}/amd64/Latest/FreeBSD-${FREEBSD_VERSION}-amd64.qcow2.xz"
+# Determine image filename based on version
+# FreeBSD 14.x uses: FreeBSD-14.3-RELEASE-amd64.qcow2.xz (no rootfs suffix)
+# FreeBSD 15.x uses: FreeBSD-15.0-RELEASE-amd64-zfs.qcow2.xz or -ufs.qcow2.xz
+MAJOR_VERSION=$(echo "$FREEBSD_VERSION" | cut -d. -f1)
+
+if [[ "$MAJOR_VERSION" -ge 15 ]]; then
+    # 15.0+ requires -ufs or -zfs suffix
+    IMAGE_FILENAME="FreeBSD-${FREEBSD_VERSION}-amd64-${FREEBSD_ROOTFS}.qcow2.xz"
+    FREEBSD_IMAGE_URL="https://download.freebsd.org/ftp/releases/VM-IMAGES/${FREEBSD_VERSION}/amd64/Latest/${IMAGE_FILENAME}"
+else
+    # 14.x and earlier - no suffix, UFS only (ZFS images not available by default)
+    if [[ "$FREEBSD_ROOTFS" == "zfs" ]]; then
+        echo "Warning: FreeBSD ${FREEBSD_VERSION} VM images are UFS by default."
+        echo "         ZFS can be configured but the base image uses UFS."
+    fi
+    IMAGE_FILENAME="FreeBSD-${FREEBSD_VERSION}-amd64.qcow2.xz"
+    FREEBSD_IMAGE_URL="https://download.freebsd.org/ftp/releases/VM-IMAGES/${FREEBSD_VERSION}/amd64/Latest/${IMAGE_FILENAME}"
+fi
+
+# Decompressed image name
+BASE_IMAGE="${IMAGE_FILENAME%.xz}"
+
+echo ""
+echo "Configuration:"
+echo "  FreeBSD Version: $FREEBSD_VERSION"
+echo "  Root Filesystem: $FREEBSD_ROOTFS"
+echo "  Image Filename:  $IMAGE_FILENAME"
+if [[ -n "$LOCAL_IMAGE_PATH" ]]; then
+    echo "  Local Image:     $LOCAL_IMAGE_PATH"
+else
+    echo "  Download URL:    $FREEBSD_IMAGE_URL"
+fi
+echo ""
 
 LIBVIRT_IMAGES="/var/lib/libvirt/images"
 WORK_DIR="$HOME/tigerbeetle-freebsd"
@@ -32,7 +131,7 @@ WORK_DIR="$HOME/tigerbeetle-freebsd"
 VM_RAM_MB=4096
 VM_VCPUS=2
 VM_DISK_SIZE="20G"       # OS disk
-VM_DATA_DISK_SIZE="50G"  # UFS data disk for TigerBeetle
+VM_DATA_DISK_SIZE="50G"  # Data disk for TigerBeetle (UFS or ZFS pool)
 
 # Network (libvirt default NAT: virbr0 = 192.168.122.0/24)
 VM_IPS=("192.168.122.10" "192.168.122.11" "192.168.122.12")
@@ -64,7 +163,7 @@ err()  { echo -e "${RED}✗${NC} $1"; }
 echo ""
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║  TigerBeetle FreeBSD Port - Automated KVM Setup          ║"
-echo "║  Strategy: UFS + POSIX AIO + kqueue (Zero-Touch)         ║"
+echo "║  FreeBSD ${FREEBSD_VERSION} / ${FREEBSD_ROOTFS^^} + POSIX AIO + kqueue     ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
 
@@ -108,7 +207,7 @@ virsh net-autostart default 2>/dev/null || true
 ok "libvirt default network active"
 
 #############################################
-# 2. DOWNLOAD FREEBSD IMAGE
+# 2. PREPARE FREEBSD IMAGE
 #############################################
 
 echo ""
@@ -117,17 +216,27 @@ echo "=== FreeBSD Image ==="
 mkdir -p "$WORK_DIR"
 cd "$WORK_DIR"
 
-COMPRESSED_IMAGE="FreeBSD-${FREEBSD_VERSION}-amd64.qcow2.xz"
-BASE_IMAGE="FreeBSD-${FREEBSD_VERSION}-amd64.qcow2"
+# COMPRESSED_IMAGE and BASE_IMAGE were set above based on version/rootfs
+COMPRESSED_IMAGE="$IMAGE_FILENAME"
 
 if [[ -f "$BASE_IMAGE" ]]; then
     ok "Base image exists: $BASE_IMAGE"
 else
-    if [[ ! -f "$COMPRESSED_IMAGE" ]]; then
+    # Check if we have a local image to copy
+    if [[ -n "$LOCAL_IMAGE_PATH" ]]; then
+        if [[ -f "$LOCAL_IMAGE_PATH" ]]; then
+            echo "Copying local image: $LOCAL_IMAGE_PATH"
+            cp "$LOCAL_IMAGE_PATH" "$WORK_DIR/$COMPRESSED_IMAGE"
+            ok "Image copied"
+        else
+            err "Local image not found: $LOCAL_IMAGE_PATH"
+            exit 1
+        fi
+    elif [[ ! -f "$COMPRESSED_IMAGE" ]]; then
         echo "Downloading FreeBSD ${FREEBSD_VERSION} (~700MB)..."
         wget -q --show-progress -c "$FREEBSD_IMAGE_URL" -O "$COMPRESSED_IMAGE"
     fi
-    echo "Decompressing (takes a few minutes)..."
+    echo "Decompressing..."
     xz -dkv "$COMPRESSED_IMAGE"
     ok "Image ready: $BASE_IMAGE"
 fi
@@ -150,7 +259,7 @@ for i in 0 1 2; do
 # ${VM_NAME} Configuration Script
 # Auto-injected via virt-customize, runs on first boot
 #
-# Strategy: UFS + Soft Updates + POSIX AIO
+# Strategy: ${FREEBSD_ROOTFS^^} + POSIX AIO
 #
 
 set -e
@@ -194,38 +303,75 @@ hostname ${VM_NAME}
 echo "  Network: ${VM_IP}" > /dev/console
 
 #-----------------------------------------
-# 2. STORAGE (UFS + Soft Updates + Journal)
+# 2. STORAGE (${FREEBSD_ROOTFS^^})
 #-----------------------------------------
-echo ">>> Configuring Storage (UFS)..." > /dev/console
+ROOTFS_TYPE="${FREEBSD_ROOTFS}"
+echo ">>> Configuring Storage (\${ROOTFS_TYPE^^})..." > /dev/console
 
-# Format data disk if not already done
-if [ ! -e "/dev/vtbd1p1" ]; then
-    echo "  Formatting /dev/vtbd1..." > /dev/console
-    gpart create -s GPT vtbd1
-    gpart add -t freebsd-ufs -l tbdata vtbd1
+if [ "\$ROOTFS_TYPE" = "zfs" ]; then
+    # ZFS STORAGE SETUP
+    # Check if pool already exists
+    if ! zpool list tbpool >/dev/null 2>&1; then
+        echo "  Creating ZFS pool on /dev/vtbd1..." > /dev/console
 
-    # -U = Soft Updates (async metadata, safe)
-    # -j = Journaling (fast fsck)
-    newfs -U -j /dev/vtbd1p1
-    echo "  UFS filesystem created" > /dev/console
-else
-    echo "  Partition already exists" > /dev/console
-fi
+        # Create GPT partition for ZFS
+        if [ ! -e "/dev/vtbd1p1" ]; then
+            gpart create -s GPT vtbd1
+            gpart add -t freebsd-zfs -l tbdata vtbd1
+        fi
 
-# Mount
-mkdir -p /tbdata
-if ! mount | grep -q "/tbdata"; then
-    if ! grep -q "vtbd1p1" /etc/fstab; then
-        echo "/dev/vtbd1p1 /tbdata ufs rw,noatime 2 2" >> /etc/fstab
+        # Create ZFS pool
+        zpool create -o ashift=12 -O compression=lz4 -O atime=off tbpool /dev/vtbd1p1
+
+        # Create dataset for TigerBeetle
+        zfs create tbpool/tigerbeetle
+        zfs create tbpool/tigerbeetle/data
+
+        # Set mountpoint
+        zfs set mountpoint=/tbdata tbpool
+
+        echo "  ZFS pool 'tbpool' created" > /dev/console
+    else
+        echo "  ZFS pool already exists" > /dev/console
     fi
-    mount /tbdata
+
+    # Ensure ZFS is enabled at boot
+    sysrc zfs_enable="YES"
+
+    FS_INFO="ZFS pool=tbpool"
+else
+    # UFS STORAGE SETUP
+    # Format data disk if not already done
+    if [ ! -e "/dev/vtbd1p1" ]; then
+        echo "  Formatting /dev/vtbd1..." > /dev/console
+        gpart create -s GPT vtbd1
+        gpart add -t freebsd-ufs -l tbdata vtbd1
+
+        # -U = Soft Updates (async metadata, safe)
+        # -j = Journaling (fast fsck)
+        newfs -U -j /dev/vtbd1p1
+        echo "  UFS filesystem created" > /dev/console
+    else
+        echo "  Partition already exists" > /dev/console
+    fi
+
+    # Mount
+    mkdir -p /tbdata
+    if ! mount | grep -q "/tbdata"; then
+        if ! grep -q "vtbd1p1" /etc/fstab; then
+            echo "/dev/vtbd1p1 /tbdata ufs rw,noatime 2 2" >> /etc/fstab
+        fi
+        mount /tbdata
+    fi
+
+    FS_INFO="UFS+SU+J"
 fi
 
 # Create TigerBeetle directories
 mkdir -p /tbdata/tigerbeetle/data
 chown -R root:wheel /tbdata/tigerbeetle
 
-echo "  Storage: /tbdata mounted (UFS+SU+J)" > /dev/console
+echo "  Storage: /tbdata mounted (\$FS_INFO)" > /dev/console
 
 #-----------------------------------------
 # 3. KERNEL MODULES (CRITICAL)
@@ -290,7 +436,7 @@ echo "║  ${VM_NAME} CONFIGURED                 ║" > /dev/console
 echo "╠════════════════════════════════════════╣" > /dev/console
 echo "║  IP:        ${VM_IP}                   ║" > /dev/console
 echo "║  Hostname:  ${VM_NAME}                 ║" > /dev/console
-echo "║  Storage:   /tbdata (UFS+SU+J)         ║" > /dev/console
+echo "║  Storage:   /tbdata (\$FS_INFO)        ║" > /dev/console
 echo "║  AIO:       Loaded                     ║" > /dev/console
 echo "║  Replica:   ${REPLICA_ID}              ║" > /dev/console
 echo "╚════════════════════════════════════════╝" > /dev/console
@@ -352,6 +498,9 @@ for i in 0 1 2; do
 
     # 4. Create and start VM
     echo "  Starting VM..."
+    # Determine os-variant based on major version
+    OS_VARIANT="freebsd${MAJOR_VERSION}.0"
+
     virt-install \
         --name "$VM_NAME" \
         --ram "$VM_RAM_MB" \
@@ -359,7 +508,7 @@ for i in 0 1 2; do
         --disk path="$BOOT_DISK",format=qcow2,bus=virtio \
         --disk path="$DATA_DISK",format=qcow2,bus=virtio \
         --network network=default,model=virtio \
-        --os-variant freebsd14.0 \
+        --os-variant "$OS_VARIANT" \
         --import \
         --graphics none \
         --noautoconsole >/dev/null
