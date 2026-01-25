@@ -4,10 +4,16 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>com.tigerbeetle</groupId>
-  <artifactId>tigerbeetle-java</artifactId>
+  <artifactId>tigerbeetle-java-parent</artifactId>
   <version>0.0.1-SNAPSHOT</version>
-  <name>TigerBeetle Java client</name>
+  <packaging>pom</packaging>
+  <name>TigerBeetle Java Client (Parent)</name>
   <description>The distributed financial accounting database designed for mission critical safety and performance.</description>
+
+  <modules>
+    <module>client-jni</module>
+    <module>client-panama</module>
+  </modules>
   <developers>
     <developer>
       <name>The TigerBeetle contributors</name>

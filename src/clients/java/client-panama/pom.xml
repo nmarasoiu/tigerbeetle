@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.tigerbeetle</groupId>
+    <artifactId>tigerbeetle-java-parent</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>tigerbeetle-java-panama</artifactId>
+  <name>TigerBeetle Java Client (Panama FFI)</name>
+  <description>TigerBeetle Java client using Panama Foreign Function &amp; Memory API. Requires Java 22+.</description>
+
+  <properties>
+    <!-- Panama FFI was finalized in JDK 22 -->
+    <maven.compiler.release>22</maven.compiler.release>
+  </properties>
+
+  <dependencies>
+    <!-- Depend on the JNI module for shared domain classes -->
+    <dependency>
+      <groupId>com.tigerbeetle</groupId>
+      <artifactId>tigerbeetle-java</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <release>22</release>
+          <!-- Enable native access for Panama FFI -->
+          <compilerArgs>
+            <arg>--enable-native-access=ALL-UNNAMED</arg>
+          </compilerArgs>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <!-- Enable native access at runtime for tests -->
+          <argLine>--enable-native-access=ALL-UNNAMED</argLine>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <archive>
+            <manifestEntries>
+              <!-- Enable native access for the JAR -->
+              <Enable-Native-Access>ALL-UNNAMED</Enable-Native-Access>
+            </manifestEntries>
+          </archive>
+        </configuration>
+      </plugin>
+
+      <!-- Source jar -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-source-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>attach-sources</id>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- Javadoc jar -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>attach-javadocs</id>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <!-- Profile to skip Panama module on older JDKs -->
+    <profile>
+      <id>skip-panama-on-old-jdk</id>
+      <activation>
+        <jdk>[,22)</jdk>
+      </activation>
+      <properties>
+        <maven.test.skip>true</maven.test.skip>
+        <maven.main.skip>true</maven.main.skip>
+      </properties>
+    </profile>
+  </profiles>
+</project>
